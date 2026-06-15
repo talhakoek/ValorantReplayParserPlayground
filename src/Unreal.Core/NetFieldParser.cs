@@ -33,7 +33,7 @@ public class NetFieldParser
     /// <param name="cache">Instance of NetGuidCache, used to resolve netguids to their string value.</param>
     /// <param name="mode"></param>
     /// <param name="assemblyNameFilter">Found assemblies should contain this string.</param>
-    public NetFieldParser(NetGuidCache cache, ParseMode mode, string assemblyNameFilter = "ReplayReader")
+    public NetFieldParser(NetGuidCache cache, ParseMode mode, string assemblyNameFilter = "Replay")
     {
         GuidCache = cache;
 
@@ -296,6 +296,12 @@ public class NetFieldParser
         }
 
         var netGroupInfo = NetFieldGroups[exportGroup.GroupId];
+
+        if (obj is IHandleNetFieldExportGroup handleReader && handleReader.ReadFieldHandle(handle, netBitReader))
+        {
+            return true;
+        }
+
         NetFieldInfo netFieldInfo;
         if (netGroupInfo.UsesHandles)
         {

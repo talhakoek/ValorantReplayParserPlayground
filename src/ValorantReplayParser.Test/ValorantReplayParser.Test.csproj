@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\ValorantReplayParser\ValorantReplayParser.csproj" />
+    <ProjectReference Include="..\Unreal.Core\Unreal.Core.csproj" />
+  </ItemGroup>
+</Project>

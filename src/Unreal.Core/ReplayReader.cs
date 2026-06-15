@@ -25,7 +25,7 @@ public abstract class ReplayReader<T> where T : Replay, new()
     /// <summary>
     /// see https://github.com/EpicGames/UnrealEngine/blob/70bc980c6361d9a7d23f6d23ffe322a2d6ef16fb/Engine/Source/Runtime/NetworkReplayStreaming/LocalFileNetworkReplayStreaming/Private/LocalFileNetworkReplayStreaming.cpp#L59
     /// </summary>
-    protected const uint FileMagic = 0x1CA2E27F;
+    protected const uint FileMagic = 1140125661;
 
     /// <summary>
     /// see https://github.com/EpicGames/UnrealEngine/blob/811c1ce579564fa92ecc22d9b70cbe9c8a8e4b9a/Engine/Source/Runtime/Engine/Classes/Engine/DemoNetDriver.h#L107
@@ -463,6 +463,7 @@ public abstract class ReplayReader<T> where T : Replay, new()
             header.Changelist = archive.ReadUInt32();
         }
 
+        archive.SkipBytes(7);
         if (header.NetworkVersion >= NetworkVersionHistory.HISTORY_RECORDING_METADATA)
         {
             header.UE4Version = archive.ReadUInt32();
@@ -1667,10 +1668,10 @@ public abstract class ReplayReader<T> where T : Replay, new()
             return false;
         }
 
-        if (enablePropertyChecksum)
+        /*if (enablePropertyChecksum)
         {
             var doChecksum = archive.ReadBit();
-        }
+        } */
 
         _logger?.LogDebug("ReceiveProperties: group {}", group.PathName);
         exportGroup = _netFieldParser.CreateType(group.PathName);
@@ -1805,8 +1806,12 @@ public abstract class ReplayReader<T> where T : Replay, new()
             return false;
         }
 
-        // const FNetFieldExport& NetFieldExport = NetFieldExportGroup->NetFieldExports[NetFieldExportHandle];
-        outField = group.NetFieldExports[(int)netFieldExportHandle];
+        // VALORANT may omit export metadata for flattened struct leaves. Keep the
+        // handle so handle-based game models can still consume the payload.
+        outField = group.IsValidIndex(netFieldExportHandle)
+            ? group.NetFieldExports[(int)netFieldExportHandle]
+            : null;
+        outField ??= new NetFieldExport { Handle = netFieldExportHandle, Name = $"Handle_{netFieldExportHandle}" };
 
         payload = archive.ReadIntPacked();
         if (archive.IsError)
@@ -2052,6 +2057,7 @@ public abstract class ReplayReader<T> where T : Replay, new()
             }
             else
             {
+                bitReader.ReadBit();
                 if (bunch.bReliable || bunch.bOpen)
                 {
                     bitReader.ReadFName();

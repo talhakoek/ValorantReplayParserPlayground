@@ -13,6 +13,8 @@
   <Project Path="src\Unreal.Encryption\Unreal.Encryption.csproj" />
   <Project Path="src\Unreal.Encryption.Test\Unreal.Encryption.Test.csproj" />
   <Project Path="src\FortniteReplayReader\FortniteReplayReader.csproj" />
+  <Project Path="src\ValorantReplayParser\ValorantReplayParser.csproj" />
+  <Project Path="src\ValorantReplayParser.Test\ValorantReplayParser.Test.csproj" />
   <Project Path="src\FortniteReplayReader.Test\FortniteReplayReader.Test.csproj" />
   <Project Path="src\ConsoleReader\ConsoleReader.csproj" />
   <Project Path="src\BenchmarkReader\BenchmarkReader.csproj" />
