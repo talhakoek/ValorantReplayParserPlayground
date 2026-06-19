@@ -1,6 +1,3 @@
-// Licensed to the .NET Foundation under one or more agreements.
-// The .NET Foundation licenses this file to you under the MIT license.
-
 using Microsoft.Extensions.Logging;
 using Unreal.Core.Models.Enums;
 
@@ -8,48 +5,39 @@ namespace ValorantReplayParser;
 
 public class Program
 {
-    // Disable logger to see only correctly parsed exports.
-    // Enable logger to see errors/warnings
-    private const bool LoggerEnabled = false;
-
-    // Normal: No movement
-    // Full: With movement
-    private static ParseMode ParseMode = ParseMode.Normal;
-
-    private const string IsolatedSampleReplay1211 = "5c673443-5bdc-4576-b416-aab3f62471a5";
-    private const string IsolatedSampleReplay1210 = "c96127a8-f003-48db-a2cd-9c71de5aba15";
-    private static readonly string DefaultReplayPath = $"Replays\\{IsolatedSampleReplay1211}.vrf";
-
     public static int Main(string[] args)
     {
+        var path = args.Length > 0 ? args[0] : @"C:\Users\Barrage\replay-work\Demos\3e32371f-5a44-4052-b221-8cb9fd38115f.vrf";
+        var verbose = args.Length > 1 && args[1] == "--verbose";
+        var full = args.Length > 2 && args[2] == "--full";
+        var channelOutPath = @"C:\Users\Barrage\replay-work\channels.jsonl";
+
         try
         {
-            using var loggerFactory = LoggerFactory.Create(builder =>
-            {
-                builder.AddConsole(options =>
-                {
-                    options.FormatterName = "minimal";
-                });
-                builder.SetMinimumLevel(LogLevel.Information);
-            });
+            using var loggerFactory = LoggerFactory.Create(b => { b.AddConsole(o => { o.FormatterName = "minimal"; }); b.SetMinimumLevel(verbose ? LogLevel.Information : LogLevel.Error); });
+            var logger = loggerFactory.CreateLogger<ValorantReplayReader>();
+            var reader = new ValorantReplayReader(verbose ? logger : null, full ? ParseMode.Full : ParseMode.Normal);
 
-            ILogger logger = loggerFactory.CreateLogger<ValorantReplayReader>();
-            var reader = new ValorantReplayReader(LoggerEnabled ? logger : null, ParseMode);
+            using var channelWriter = new StreamWriter(channelOutPath) { AutoFlush = true };
+            reader.ChannelEventWriter = channelWriter;
 
-            var replay = reader.ReadReplay(DefaultReplayPath);
+            Console.Error.WriteLine($"Path:      {path}");
+            Console.Error.WriteLine($"ParseMode: {(full ? "Full" : "Normal")}");
+            Console.Error.WriteLine($"Channels:  {channelOutPath}");
 
-            Console.WriteLine("-------- Finished Reading Replay -------");
-            Console.WriteLine($"Date: {replay.Info.Timestamp.ToLongDateString()}");
-            Console.WriteLine($"Length: {TimeSpan.FromMilliseconds(replay.Info.LengthInMs).ToString()}");
-            Console.WriteLine($"Name: {replay.Info.FriendlyName}");
-            Console.WriteLine($"Branch: {replay.Header.Branch}");
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var replay = reader.ReadReplay(path);
+            sw.Stop();
+            Console.Error.WriteLine($"Parse:     {sw.ElapsedMilliseconds} ms");
+            channelWriter.Flush();
+            var fi = new FileInfo(channelOutPath);
+            Console.Error.WriteLine($"Channels written: {fi.Length} bytes");
             return 0;
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine(ex);
+            Console.Error.WriteLine($"FAIL: {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
             return 1;
         }
     }
 }
-

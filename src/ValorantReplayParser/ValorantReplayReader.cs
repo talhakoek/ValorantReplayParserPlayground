@@ -15,6 +15,16 @@ namespace ValorantReplayParser;
 public class ValorantReplayReader(ILogger? logger = null, ParseMode parseMode = ParseMode.Minimal)
     : ReplayReader<ValorantReplay>(logger ?? NullLogger.Instance, parseMode)
 {
+    // === REVAMPED extensions: ability/utility channel capture =================
+    // We track every actor channel opening AND closing. For each we capture the
+    // actor's CLASS path (resolved via the netGuid cache's archetype lookup),
+    // its initial spawn LOCATION, and the current BombGameState clock so we
+    // know WHEN in the match the actor showed up. This is the bridge that
+    // gives us smoke/molly/cam/turret deployment data without having to
+    // reverse-engineer each ability's netfield bit layout.
+    public StreamWriter? ChannelEventWriter { get; set; }
+    private double _lastBombSec = 0;
+
     public ValorantReplay ReadReplay(string fileName)
     {
         using var stream = File.OpenRead(fileName);
@@ -56,21 +66,30 @@ public class ValorantReplayReader(ILogger? logger = null, ParseMode parseMode = 
             Archive = transformedReader,
         };
 
-
         return base.ReceivedReplicatorBunch(transformedBunch, transformedReader, repObject, bHasRepLayout);
     }
 
-    private static List<object> moves = new();
-
     protected override void OnExportRead(uint channelIndex, INetFieldExportGroup? exportGroup)
     {
-
-        if (exportGroup is null)
-        {
-            // Console.WriteLine($"Chindex={channelIndex}\tGroup=null");
-            return;
-        }
+        if (exportGroup is null) return;
         var type = exportGroup.GetType();
+
+        // Stash bomb clock whenever a BombGameState update lands so OnChannelOpened
+        // (which fires for unrelated actors) can timestamp itself correctly.
+        if (type.Name == "BombGameState")
+        {
+            var bombProp = type.GetProperty("ReplicatedWorldTimeSecondsDouble");
+            if (bombProp is not null)
+            {
+                try
+                {
+                    var v = bombProp.GetValue(exportGroup);
+                    if (v is double dv) _lastBombSec = dv;
+                    else if (v is float fv) _lastBombSec = fv;
+                }
+                catch { /* ignore */ }
+            }
+        }
 
         var props = type
             .GetProperties(BindingFlags.Instance | BindingFlags.Public)
@@ -80,27 +99,50 @@ public class ValorantReplayReader(ILogger? logger = null, ParseMode parseMode = 
                 object? value;
                 try { value = p.GetValue(exportGroup); }
                 catch { value = "<error reading property>"; }
-
                 return new { p.Name, Value = value };
             })
             .Where(x => x.Value is not null);
 
-        var json = JsonSerializer.Serialize(props, new JsonSerializerOptions
-        {
-            WriteIndented = false
-        });
-
+        var json = JsonSerializer.Serialize(props, new JsonSerializerOptions { WriteIndented = false });
         Console.WriteLine($"Chindex={channelIndex}\tType={type.Name}\tFields={json}");
-
     }
 
-    protected override void OnExternalDataRead(uint channelIndex, IExternalData? exportGroup)
+    // === Channel lifecycle hooks ==============================================
+    protected override void OnChannelOpened(uint channelIndex, NetworkGUID? actor)
     {
+        if (ChannelEventWriter is null) return;
+        var ch = Channels[channelIndex];
+        var actorObj = ch?.Actor;
+        if (actorObj is null) return;
+        string classPath = "";
+        if (ch?.ArchetypeId is uint arch && _netGuidCache.TryGetPathName(arch, out var p))
+            classPath = p;
+        var loc = actorObj.Location;
+        // JSON line: {"ev":"open","ch":N,"guid":N,"arch":N,"cls":"...","x":X,"y":Y,"z":Z,"t":sec}
+        ChannelEventWriter.WriteLine(
+            "{\"ev\":\"open\",\"ch\":" + channelIndex +
+            ",\"guid\":" + (actorObj.ActorNetGUID?.Value ?? 0) +
+            ",\"arch\":" + (ch?.ArchetypeId ?? 0) +
+            ",\"cls\":" + JsonSerializer.Serialize(classPath) +
+            ",\"x\":" + (loc?.X.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) ?? "0") +
+            ",\"y\":" + (loc?.Y.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) ?? "0") +
+            ",\"z\":" + (loc?.Z.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) ?? "0") +
+            ",\"t\":" + _lastBombSec.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) +
+            "}");
     }
 
-    protected override void OnNetDeltaRead(uint channelIndex, NetDeltaUpdate update)
+    protected override void OnChannelClosed(uint channelIndex, NetworkGUID? actor)
     {
+        if (ChannelEventWriter is null) return;
+        ChannelEventWriter.WriteLine(
+            "{\"ev\":\"close\",\"ch\":" + channelIndex +
+            ",\"guid\":" + (actor?.Value ?? 0) +
+            ",\"t\":" + _lastBombSec.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) +
+            "}");
     }
+
+    protected override void OnExternalDataRead(uint channelIndex, IExternalData? exportGroup) { }
+    protected override void OnNetDeltaRead(uint channelIndex, NetDeltaUpdate update) { }
 
     private static NetBitReader CreateReader(byte[] payload, int payloadBits, FBitArchive archive) => new(payload, payloadBits)
     {
@@ -126,5 +168,4 @@ public class ValorantReplayReader(ILogger? logger = null, ParseMode parseMode = 
         var output = Oodle.DecompressReplayData(archive.ReadBytes(cs), ds);
         return new BinaryReader(new MemoryStream(output.ToArray())) { EngineNetworkVersion = Replay.Header.EngineNetworkVersion, NetworkVersion = Replay.Header.NetworkVersion, ReplayHeaderFlags = Replay.Header.Flags, ReplayVersion = Replay.Info.FileVersion };
     }
-
 }
